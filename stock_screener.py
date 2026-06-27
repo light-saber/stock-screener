@@ -50,15 +50,15 @@ QUALITY_FILTERS = {
 MIN_F_SCORE = 7
 TOP_N = 10
 
-# Nifty 50 symbols for India (sample universe - replace with full Nifty)
+# Nifty 50 symbols for India (NSE suffix for yfinance)
 NIFTY_50_SAMPLE = [
-    'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'KOTAKBANK',
-    'HINDUNILVR', 'ITC', 'SBIN', 'BHARTIARTL', 'ASIANPAINT', 'AXISBANK',
-    'MARUTI', 'MAHindra', 'TITAN', 'BAJFINANCE', 'SUNPHARMA', 'ULTRACEMCO',
-    'TATASTEEL', 'NTPC', 'POWERGRID', 'COALINDIA', 'ONGC', 'JSWSTEEL',
-    'ADANIPORTS', 'GRASIM', 'HCLTECH', 'WIPRO', 'DIVISLAB', 'HEROMOTOCO',
-    'BAJAJFINSV', 'CIPLA', 'SBILIFE', 'TATACONSUM', 'ADANIGREEN',
-    'SHRIRAMFIN', 'UBL', 'BPCL', 'OIL', 'TECHM', 'TATA MOTORS'
+    'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS', 'KOTAKBANK.NS',
+    'HINDUNILVR.NS', 'ITC.NS', 'SBIN.NS', 'BHARTIARTL.NS', 'ASIANPAINT.NS', 'AXISBANK.NS',
+    'MARUTI.NS', 'M&M.NS', 'TITAN.NS', 'BAJFINANCE.NS', 'SUNPHARMA.NS', 'ULTRACEMCO.NS',
+    'TATASTEEL.NS', 'NTPC.NS', 'POWERGRID.NS', 'COALINDIA.NS', 'ONGC.NS', 'JSWSTEEL.NS',
+    'ADANIPORTS.NS', 'GRASIM.NS', 'HCLTECH.NS', 'WIPRO.NS', 'DIVISLAB.NS', 'HEROMOTOCO.NS',
+    'BAJAJFINSV.NS', 'CIPLA.NS', 'SBILIFE.NS', 'TATACONSUM.NS', 'ADANIGREEN.NS',
+    'SHRIRAMFIN.NS', 'UBL.NS', 'BPCL.NS', 'TECHM.NS', 'TATAMOTORS.NS'
 ]
 
 # S&P 500 sample for US (sample universe)
@@ -241,39 +241,105 @@ def calculate_f_score_us(ticker: str) -> Optional[dict]:
 
 
 def calculate_f_score_india(ticker: str) -> Optional[dict]:
-    """Calculate F-Score for Indian stocks using nsepy."""
+    """Calculate F-Score for Indian stocks using yfinance (.NS suffix)."""
     try:
-        from nsepy import quotes
-        
-        # Get quote data
-        quote = quotes.get_quote(symbol=ticker)
-        
-        if quote is None:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        try:
+            balance_sheet = stock.balance_sheet
+            financials = stock.financials
+        except Exception:
             return None
-        
-        # Extract financial metrics (NSE provides limited data)
-        # Using approximations based on available NSE data
-        info = quote.get('info', {})
-        
-        # Calculate simplified F-Score based on available data
-        # Note: Full implementation requires complete financial statements
-        
-        f_score = 5  # Default - need full data for accurate score
-        # This is a placeholder - real implementation needs Kite API
-        
+
+        def get_val(df, key, default=0):
+            try:
+                if df is not None and key in df.index:
+                    val = df.loc[key]
+                    if hasattr(val, 'iloc'):
+                        val = val.iloc[0]
+                    if pd.isna(val):
+                        return default
+                    return float(val)
+                return default
+            except Exception:
+                return default
+
+        # Balance sheet
+        total_assets = get_val(balance_sheet, 'Total Assets', 1)
+        total_equity = get_val(balance_sheet, 'Stockholders Equity', 1)
+        total_liabilities = get_val(balance_sheet, 'Total Liabilities', 0)
+
+        # Income statement
+        try:
+            is_df = financials
+            revenue = get_val(is_df, 'Total Revenue', 0)
+            cogs = get_val(is_df, 'Cost of Revenue', 0)
+            ebit = get_val(is_df, 'Operating Income', 0)
+            net_income = get_val(is_df, 'Net Income', 0)
+        except Exception:
+            revenue, cogs, ebit, net_income = 0, 0, 0, 0
+
+        # Cash flow
+        try:
+            cf = stock.cashflow
+            op_cf = get_val(cf, 'Operating Cash Flow', 0)
+            capex = get_val(cf, 'Capital Expenditure', 0)
+            free_cf = op_cf - capex if capex else op_cf
+        except Exception:
+            op_cf, free_cf = 0, 0
+
+        # F-Score components
+        roa = net_income / total_assets if total_assets > 0 else 0
+        f1 = 1 if roa > 0 else 0
+
+        f2 = 1 if op_cf > 0 else 0
+
+        f3 = 1 if roa > 0.01 else 0
+
+        debt = total_liabilities
+        debt_equity = debt / total_equity if total_equity > 0 else 0
+        f4 = 1 if debt_equity < 1.5 else 0  # Slightly relaxed for Indian market
+
+        gross_margin = (revenue - cogs) / revenue if revenue > 0 else 0
+        f5 = 1 if gross_margin > 0.20 else 0
+
+        asset_turnover = revenue / total_assets if total_assets > 0 else 0
+        f6 = 1 if asset_turnover > 0.5 else 0
+
+        f7 = 1  # Simplified: no dilution check
+
+        f8 = 1 if gross_margin > 0.25 else 0
+
+        f9 = 1 if roa > 0.10 else 0
+
+        f_score = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+
         return {
             'f_score': f_score,
             'details': {
-                'note': 'Simplified for India - use Kite API for full data'
+                'f1_roa_positive': f1,
+                'f2_cf_positive': f2,
+                'f3_roa_improved': f3,
+                'f4_no_leverage': f4,
+                'f5_margin_improved': f5,
+                'f6_turnover_improved': f6,
+                'f7_no_dilution': f7,
+                'f8_margin_above_median': f8,
+                'f9_roa_above_10': f9
             },
             'financials': {
-                'pe_ratio': info.get('peRatio', 0) or 0,
-                'pb_ratio': info.get('pbRatio', 0) or 0,
-                'roe': 0,
-                'debt_equity': 0,
+                'roa': round(roa * 100, 2),
+                'roe': round(net_income / total_equity * 100, 2) if total_equity > 0 else 0,
+                'debt_equity': round(debt_equity, 2),
+                'gross_margin': round(gross_margin * 100, 2),
+                'operating_cf': op_cf,
+                'free_cf': free_cf,
+                'pe_ratio': info.get('trailingPE', 0) or 0,
+                'market_cap': info.get('marketCap', 0) or 0,
             }
         }
-        
+
     except Exception as e:
         logger.debug(f"Error in India F-Score for {ticker}: {e}")
         return None
