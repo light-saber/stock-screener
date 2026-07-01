@@ -44,11 +44,11 @@ logger = logging.getLogger(__name__)
 QUALITY_FILTERS = {
     'india': {
         'min_roe': 15.0,
-        'min_roic': 15.0,        # NEW: ROIC gate
+        'min_roic': 12.0,       # Relaxed: Indian mid-caps rarely sustain >15% through cycles
         'max_debt_equity': 1.0,
-        'min_revenue_cagr': 5.0,  # 3-yr CAGR
+        'min_revenue_cagr': 5.0,
         'max_pe': 25.0,
-        'min_fcf_netincome_ratio': 0.7,  # NEW: earnings quality
+        'min_fcf_netincome_ratio': 0.7,
     },
     'us': {
         'min_roe': 15.0,
